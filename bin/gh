@@ -1,0 +1,456 @@
+#!/usr/bin/env python3
+"""
+Token-hiding GitHub CLI proxy.
+
+This command is intended to be placed before the real `gh` in PATH. It runs the
+official GitHub CLI inside a disposable Docker container, so GitHub CLI auth
+state is kept out of the host OS. The wrapper blocks token-printing commands on
+the host-side interface.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+APP = "gh-sandbox-proxy"
+DEFAULT_IMAGE = "gh-sandbox-proxy:latest"
+DEFAULT_TTL_SECONDS = 3600
+CONTAINER_LABEL = "app=gh-sandbox-proxy"
+
+
+DEFAULT_CONFIG: dict[str, Any] = {
+    "image": DEFAULT_IMAGE,
+    "ttl": "1h",
+    "container_name": "gh-sandbox-proxy",
+    "workdir_mount": True,
+    "auto_auth": True,
+    "auth_hostname": "github.com",
+    "blocked": [
+        ["auth", "token"],
+        ["auth", "status", "--show-token"],
+    ],
+    "no_auth_commands": [
+        ["--help"],
+        ["help"],
+        ["--version"],
+        ["version"],
+        ["completion"],
+        ["sandbox"],
+        ["auth", "login"],
+        ["auth", "logout"],
+        ["auth", "status"],
+    ],
+}
+
+
+def eprint(message: str = "") -> None:
+    print(message, file=sys.stderr)
+
+
+def run(cmd: list[str], *, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        cmd,
+        check=check,
+        text=True,
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.PIPE if capture else None,
+    )
+
+
+def config_path() -> Path:
+    return Path(os.environ.get("GH_SANDBOX_CONFIG", "~/.config/gh-sandbox-proxy/config.yml")).expanduser()
+
+
+def parse_scalar(value: str) -> Any:
+    value = value.strip()
+    if value in {"true", "True"}:
+        return True
+    if value in {"false", "False"}:
+        return False
+    if value in {"null", "None", "~"}:
+        return None
+    if value.startswith('"') and value.endswith('"'):
+        return value[1:-1]
+    if value.startswith("'") and value.endswith("'"):
+        return value[1:-1]
+    return value
+
+
+def parse_yaml_like(text: str) -> dict[str, Any]:
+    """
+    Tiny YAML subset parser for this config file.
+
+    Supported:
+      key: scalar
+      key:
+        - scalar
+        - ["a", "b"]
+    """
+    result: dict[str, Any] = {}
+    current_key: str | None = None
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].rstrip()
+        if not line.strip():
+            continue
+        if not line.startswith(" ") and ":" in line:
+            key, value = line.split(":", 1)
+            current_key = key.strip()
+            if value.strip():
+                result[current_key] = parse_scalar(value)
+            else:
+                result[current_key] = []
+            continue
+        if current_key and line.lstrip().startswith("-"):
+            item = line.lstrip()[1:].strip()
+            if item.startswith("["):
+                result[current_key].append(json.loads(item.replace("'", '"')))
+            else:
+                result[current_key].append(parse_scalar(item))
+            continue
+        raise ValueError(f"unsupported config line: {raw_line}")
+    return result
+
+
+def load_config() -> dict[str, Any]:
+    cfg = dict(DEFAULT_CONFIG)
+    path = config_path()
+    if path.exists():
+        try:
+            cfg.update(parse_yaml_like(path.read_text()))
+        except Exception as exc:
+            raise SystemExit(f"{APP}: failed to read {path}: {exc}") from exc
+    return cfg
+
+
+def parse_duration(value: Any) -> int:
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    match = re.fullmatch(r"(\d+)([smhd]?)", text)
+    if not match:
+        raise SystemExit(f"{APP}: invalid ttl {value!r}; use examples like 30m, 1h, 3600")
+    amount = int(match.group(1))
+    unit = match.group(2) or "s"
+    return amount * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+
+
+def pattern_matches(args: list[str], pattern: list[str]) -> bool:
+    if len(args) < len(pattern):
+        return False
+    return args[: len(pattern)] == pattern
+
+
+def is_blocked(args: list[str], cfg: dict[str, Any]) -> bool:
+    for pattern in cfg.get("blocked", []):
+        if pattern_matches(args, list(pattern)):
+            return True
+    return False
+
+
+def needs_auth(args: list[str], cfg: dict[str, Any]) -> bool:
+    if not cfg.get("auto_auth", True):
+        return False
+    if not args:
+        return False
+    for pattern in cfg.get("no_auth_commands", []):
+        if pattern_matches(args, list(pattern)):
+            return False
+    return True
+
+
+def container_name(cfg: dict[str, Any]) -> str:
+    base = str(cfg.get("container_name") or "gh-sandbox-proxy")
+    user = re.sub(r"[^a-zA-Z0-9_.-]", "-", os.environ.get("USER", "user"))
+    return f"{base}-{user}"
+
+
+def auth_volume_name(cfg: dict[str, Any]) -> str:
+    return f"{container_name(cfg)}-auth"
+
+
+def docker_exists(name: str) -> bool:
+    proc = run(["docker", "inspect", name], check=False, capture=True)
+    return proc.returncode == 0
+
+
+def docker_running(name: str) -> bool:
+    proc = run(["docker", "inspect", "-f", "{{.State.Running}}", name], check=False, capture=True)
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
+def docker_started_at(name: str) -> float | None:
+    proc = run(["docker", "inspect", "-f", "{{.State.StartedAt}}", name], check=False, capture=True)
+    if proc.returncode != 0:
+        return None
+    text = proc.stdout.strip()
+    if not text:
+        return None
+    # Docker returns RFC3339Nano. Keep parsing simple by dropping nanoseconds.
+    text = re.sub(r"\.\d+Z$", "Z", text)
+    if text.startswith("0001-"):
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def remove_container(name: str) -> None:
+    run(["docker", "rm", "-f", name], check=False, capture=True)
+
+
+def remove_auth_volume(cfg: dict[str, Any]) -> None:
+    run(["docker", "volume", "rm", "-f", auth_volume_name(cfg)], check=False, capture=True)
+
+
+def mounted_workdir(name: str) -> str | None:
+    proc = run(["docker", "inspect", "-f", "{{json .Mounts}}", name], check=False, capture=True)
+    if proc.returncode != 0:
+        return None
+    try:
+        mounts = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    for mount in mounts:
+        if mount.get("Destination") == "/work":
+            return mount.get("Source")
+    return None
+
+
+def mount_matches_cwd(mount_source: str | None, cwd: str) -> bool:
+    if mount_source is None:
+        return False
+    candidates = {cwd}
+    if cwd.startswith("/Users/"):
+        candidates.add(f"/host_mnt{cwd}")
+    if cwd.startswith("/Volumes/"):
+        candidates.add(f"/host_mnt{cwd}")
+    return mount_source in candidates
+
+
+def ensure_container(cfg: dict[str, Any]) -> str:
+    name = container_name(cfg)
+    ttl = parse_duration(cfg.get("ttl", DEFAULT_TTL_SECONDS))
+    mount_requested = bool(cfg.get("workdir_mount", True))
+    cwd = str(Path.cwd())
+    if docker_exists(name):
+        started = docker_started_at(name)
+        if started and time.time() - started > ttl:
+            eprint(f"{APP}: sandbox expired after {cfg.get('ttl')}; recreating container")
+            remove_container(name)
+            remove_auth_volume(cfg)
+        elif not docker_running(name):
+            remove_container(name)
+        elif mount_requested and not mount_matches_cwd(mounted_workdir(name), cwd):
+            eprint(f"{APP}: recreating sandbox for current directory mount")
+            remove_container(name)
+
+    if docker_running(name):
+        return name
+
+    image = str(cfg.get("image") or DEFAULT_IMAGE)
+    eprint(f"{APP}: starting sandbox container {name} ({image})")
+
+    def start_with_mount(mount_workdir: bool) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        cmd = [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            name,
+            "--label",
+            CONTAINER_LABEL,
+            "-v",
+            f"{auth_volume_name(cfg)}:/root/.config/gh",
+            "--entrypoint",
+            "/bin/sh",
+        ]
+        if mount_workdir:
+            cmd += ["-v", f"{cwd}:/work", "-w", "/work"]
+        cmd += [image, "-c", "sleep infinity"]
+        return run(cmd, check=False, capture=True), cmd
+
+    mount_requested = bool(cfg.get("workdir_mount", True))
+    proc, cmd = start_with_mount(mount_requested)
+    if proc.returncode != 0 and mount_requested and "mounts denied" in proc.stderr:
+        eprint(f"{APP}: current directory mount was denied by Docker Desktop; retrying without /work mount")
+        remove_container(name)
+        proc, cmd = start_with_mount(False)
+
+    if proc.returncode != 0:
+        raise SystemExit(
+            f"{APP}: failed to start Docker sandbox.\n"
+            f"Command: {' '.join(shlex.quote(part) for part in cmd)}\n"
+            f"{proc.stderr.strip()}"
+        )
+    return name
+
+
+def docker_exec(name: str, args: list[str], *, capture: bool = False, tty: bool | None = None) -> subprocess.CompletedProcess[str]:
+    cmd = ["docker", "exec"]
+    if tty is None:
+        tty = sys.stdin.isatty() and sys.stdout.isatty()
+    if tty:
+        cmd.append("-it")
+    cmd += [name, *args]
+    return run(cmd, check=False, capture=capture)
+
+
+def prepare_browser_hook(name: str) -> None:
+    script = """#!/bin/sh
+printf '%s\\n' "$@" > /tmp/gh-sandbox-proxy-browser-url
+exit 0
+"""
+    proc = subprocess.run(
+        ["docker", "exec", "-i", name, "sh", "-c", "cat > /tmp/gh-sandbox-proxy-browser && chmod +x /tmp/gh-sandbox-proxy-browser"],
+        input=script,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(f"{APP}: failed to prepare browser hook: {proc.stderr.strip()}")
+
+
+def clear_browser_url(name: str) -> None:
+    docker_exec(name, ["rm", "-f", "/tmp/gh-sandbox-proxy-browser-url"], capture=True, tty=False)
+
+
+def read_browser_url(name: str) -> str | None:
+    proc = docker_exec(name, ["cat", "/tmp/gh-sandbox-proxy-browser-url"], capture=True, tty=False)
+    if proc.returncode != 0:
+        return None
+    url = proc.stdout.strip().splitlines()[0] if proc.stdout.strip() else ""
+    return url or None
+
+
+def docker_exec_gh(name: str, args: list[str]) -> subprocess.CompletedProcess[str]:
+    prepare_browser_hook(name)
+    clear_browser_url(name)
+    cmd = ["docker", "exec"]
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        cmd.append("-it")
+    cmd += ["-e", "BROWSER=/tmp/gh-sandbox-proxy-browser", name, "gh", *args]
+    proc = run(cmd, check=False, capture=False)
+    url = read_browser_url(name)
+    if url:
+        opener = os.environ.get("GH_SANDBOX_OPEN") or ("open" if sys.platform == "darwin" else "xdg-open")
+        host_open = subprocess.run([opener, url], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        if host_open.returncode != 0:
+            eprint(f"{APP}: failed to open browser on host: {host_open.stderr.strip()}")
+            eprint(url)
+    return proc
+
+
+def ensure_auth(name: str, cfg: dict[str, Any]) -> None:
+    host = str(cfg.get("auth_hostname") or "github.com")
+    status = docker_exec(name, ["gh", "auth", "status", "-h", host], capture=True, tty=False)
+    if status.returncode == 0:
+        return
+    eprint(f"{APP}: GitHub CLI is not authenticated inside the sandbox.")
+    eprint(f"{APP}: starting container-local auth. Token will not be stored in host gh config.")
+    login = docker_exec(name, ["gh", "auth", "login", "-h", host, "--web"], tty=True)
+    if login.returncode != 0:
+        raise SystemExit(login.returncode)
+
+
+def print_help() -> None:
+    print(
+        """gh-sandbox-proxy
+
+This is a host-side `gh` proxy. It runs the official GitHub CLI inside a
+disposable Docker container and blocks token-printing commands.
+
+Default behavior:
+  gh <any gh command>        proxy to container-local official gh
+  gh auth token             blocked on purpose
+  gh auth status --show-token
+                            blocked on purpose
+
+Sandbox controls:
+  gh sandbox status         show container status
+  gh sandbox cleanup        destroy the sandbox immediately
+  gh sandbox build          build the local Docker image
+  gh sandbox config         show config path
+
+Config:
+  ~/.config/gh-sandbox-proxy/config.yml
+  GH_SANDBOX_CONFIG=/path/to/config.yml
+
+Notes:
+  - The default TTL is 1h.
+  - Tokens are not written to the host gh config by this wrapper.
+  - While the container is alive, commands executed inside that container can
+    still use the container-local gh authentication.
+"""
+    )
+
+
+def sandbox_command(args: list[str], cfg: dict[str, Any]) -> int:
+    name = container_name(cfg)
+    sub = args[1] if len(args) > 1 else "status"
+    if sub == "status":
+        if docker_running(name):
+            started = docker_started_at(name)
+            age = int(time.time() - started) if started else "unknown"
+            print(f"running: {name}")
+            print(f"age_seconds: {age}")
+            print(f"ttl: {cfg.get('ttl')}")
+        else:
+            print(f"not running: {name}")
+        return 0
+    if sub == "cleanup":
+        remove_container(name)
+        remove_auth_volume(cfg)
+        print(f"removed: {name}")
+        print(f"removed: {auth_volume_name(cfg)}")
+        return 0
+    if sub == "build":
+        image = str(cfg.get("image") or DEFAULT_IMAGE)
+        root = Path(__file__).resolve().parents[1]
+        proc = subprocess.run(["docker", "build", "-t", image, str(root)])
+        return proc.returncode
+    if sub == "config":
+        print(config_path())
+        return 0
+    print(f"{APP}: unknown sandbox command: {sub}", file=sys.stderr)
+    return 2
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    cfg = load_config()
+
+    if not args or args in (["--help"], ["help"], ["-h"]):
+        print_help()
+        return 0
+
+    if args[0] == "sandbox":
+        return sandbox_command(args, cfg)
+
+    if is_blocked(args, cfg):
+        eprint(f"{APP}: blocked: this wrapper never exposes GitHub auth tokens on the host interface.")
+        eprint(f"{APP}: command was: gh {' '.join(shlex.quote(arg) for arg in args)}")
+        eprint(f"{APP}: use GitHub web settings to revoke tokens if needed.")
+        return 2
+
+    name = ensure_container(cfg)
+    if needs_auth(args, cfg):
+        ensure_auth(name, cfg)
+
+    proc = docker_exec_gh(name, args)
+    return proc.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

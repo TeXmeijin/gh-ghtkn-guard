@@ -1,0 +1,41 @@
+# gh-sandbox-proxy config
+#
+# Copy to:
+#   ~/.config/gh-sandbox-proxy/config.yml
+#
+# Or point the wrapper at it:
+#   export GH_SANDBOX_CONFIG=/path/to/config.yml
+
+# Local image built from Dockerfile in this repository.
+image: gh-sandbox-proxy:latest
+
+# Max lifetime for one authenticated sandbox container.
+ttl: 1h
+
+# Container name is suffixed with the current host user.
+container_name: gh-sandbox-proxy
+
+# Mount the current working directory at /work so git-aware gh commands can see it.
+workdir_mount: true
+
+# If a proxied command needs auth and the sandbox is not authenticated, run
+# `gh auth login --web` inside the container.
+auto_auth: true
+auth_hostname: github.com
+
+# These commands never pass through to container gh because they print tokens.
+blocked:
+  - ["auth", "token"]
+  - ["auth", "status", "--show-token"]
+
+# Commands that should not trigger auto-login before running.
+no_auth_commands:
+  - ["--help"]
+  - ["help"]
+  - ["--version"]
+  - ["version"]
+  - ["completion"]
+  - ["sandbox"]
+  - ["auth", "login"]
+  - ["auth", "logout"]
+  - ["auth", "status"]
