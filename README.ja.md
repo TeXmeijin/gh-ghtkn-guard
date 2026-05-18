@@ -37,43 +37,27 @@ asset の SHA256 checksum を固定して検証します。
 container が生きている間、その container 内でコマンドを実行できる主体は、
 container-local の GitHub CLI session を利用できます。
 
-## インストール
+## Setup
 
-installer を実行します。
+この project は一発 setup script を提供しません。shell startup file、symlink、
+Docker resource、repository mount 設定に触るため、setup は agent と対話しながら
+承認ベースで進めます。
 
-```zsh
-./install.sh
+同梱の Claude Code / Codex Skill を使います。
+
+```text
+skills/gh-sandbox-proxy-setup/SKILL.md
 ```
 
-`install.sh` は低レベルの実行 helper です。手元で直接実行する場合は、次の変更が
-入ることを理解してから実行してください。
+Skill は最初に shell startup file、既存の `gh` 解決先、repository root 候補を
+調べます。そのうえで、書き込む file、作る symlink、Docker resource、
+`workspace_mounts` を提示し、承認を得てから変更します。
 
-- `~/.local/bin/gh` をこの wrapper への symlink として install する
-- Claude Code、Codex などの非対話 zsh で Homebrew path より先に wrapper が
-  解決されるよう、`~/.zshenv` に marker 付き zsh PATH shim を追加する
-- Docker image を build する
-- command resolution と `gh auth token` が block されることを検証する
-
-uninstall は次です。
+uninstall は削除内容を確認してから実行します。
 
 ```zsh
 ./uninstall.sh
 ```
-
-## Agent Setup
-
-この repository には Claude Code Skill も含めています。
-
-```text
-skills/gh-sandbox-proxy-installer/SKILL.md
-```
-
-別の machine で agent に install、verify、PATH 問題の調査、uninstall を
-任せる場合に使えます。実際の machine 変更は `install.sh` / `uninstall.sh`
-に集約していますが、Skill はそれらを即実行しません。Claude Code や Codex
-利用者向けには、この Skill 経由の setup が推奨です。agent は最初に shell
-startup file、既存の `gh` 解決先、repository root 候補を調べ、書き込む file、
-作る symlink、Docker resource、`workspace_mounts` を提示してから承認を取ります。
 
 ## 使い方
 

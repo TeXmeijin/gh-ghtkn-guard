@@ -36,45 +36,28 @@ It is not a perfect defense against arbitrary local code execution. While the
 sandbox container is alive, anything that can run commands in that container can
 use the container-local GitHub CLI session.
 
-## Install
+## Setup
 
-Run the installer:
+This project does not provide a one-shot setup script. Setup is intentionally
+agent-assisted and approval-driven because it touches shell startup files,
+symlinks, Docker resources, and repository mount configuration.
 
-```zsh
-./install.sh
+Use the bundled Claude Code / Codex Skill:
+
+```text
+skills/gh-sandbox-proxy-setup/SKILL.md
 ```
 
-`install.sh` is a low-level execution helper. If you run it directly, review the
-changes it will make first:
+The skill first inspects shell startup files, existing `gh` resolution, and
+repository root candidates. It then asks for approval with the exact files,
+symlink, Docker resources, and `workspace_mounts` it plans to use before making
+changes.
 
-- installs `~/.local/bin/gh` as a symlink to this wrapper
-- adds a marked zsh PATH shim to `~/.zshenv` so non-interactive Claude Code,
-  Codex, and similar coding-agent shells resolve the wrapper before Homebrew
-  paths
-- builds the Docker image
-- verifies command resolution and that `gh auth token` is blocked
-
-To uninstall:
+To uninstall, inspect what will be removed and then run:
 
 ```zsh
 ./uninstall.sh
 ```
-
-## Agent Setup
-
-This repository also includes a Claude Code Skill at:
-
-```text
-skills/gh-sandbox-proxy-installer/SKILL.md
-```
-
-Use it when asking an agent to install, verify, troubleshoot PATH issues, or
-uninstall the wrapper on another machine. The Skill delegates the actual machine
-changes to `install.sh` / `uninstall.sh`, but it should not run them
-immediately. This is the recommended setup route when installing for Claude Code
-or Codex users because the agent first inspects shell startup files, existing
-`gh` resolution, and repository root candidates, then asks for approval with the
-exact files, symlink, Docker resources, and `workspace_mounts` it plans to use.
 
 ## Usage
 

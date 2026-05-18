@@ -1,20 +1,20 @@
 ---
-name: gh-sandbox-proxy-installer
-description: Install, verify, update, or uninstall the gh-sandbox-proxy wrapper for Claude Code, Codex, or similar coding-agent users so GitHub CLI auth runs inside Docker and host `gh auth token` is blocked. Use when a user asks to set up the safer gh wrapper, distribute it to a machine, fix agent PATH issues for gh, or revert the wrapper.
+name: gh-sandbox-proxy-setup
+description: Interactively set up, verify, update, or uninstall gh-sandbox-proxy for Claude Code, Codex, or similar coding-agent users so GitHub CLI auth runs inside Docker and host `gh auth token` is blocked. Use when a user asks to set up the safer gh wrapper, distribute it to a machine, fix agent PATH issues for gh, or revert the wrapper.
 ---
 
-# gh-sandbox-proxy installer
+# gh-sandbox-proxy setup
 
-Use this skill to install or maintain `gh-sandbox-proxy`, a wrapper for
+Use this skill to set up or maintain `gh-sandbox-proxy`, a wrapper for
 developers who let Claude Code, Codex, or similar coding agents run local shell
 commands. It proxies `gh` commands into a Docker sandbox while blocking
 host-side token printing.
 
-## Install workflow
+## Setup Workflow
 
-Do not start by running `./install.sh`. This skill should make setup
-interactive because it changes shell startup files, symlinks, Docker images,
-and sandbox mount configuration.
+This skill owns setup. There is no one-shot setup script. Setup must be
+interactive because it changes shell startup files, symlinks, Docker images, and
+sandbox mount configuration.
 
 1. Locate or clone the `gh-sandbox-proxy` repository.
 2. Inspect the current machine without making changes:
@@ -24,7 +24,6 @@ pwd
 command -v gh || true
 type gh || true
 test -f ~/.zshenv && grep -n "gh-sandbox-proxy\\|gh wrapper\\|\\.local/bin" ~/.zshenv || true
-gh sandbox suggest-mounts 2>/dev/null || true
 ```
 
 3. Inspect likely repository roots and choose stable ancestor directories for
@@ -37,24 +36,38 @@ gh sandbox suggest-mounts 2>/dev/null || true
 - Exact files that will be changed, usually `~/.zshenv` and
   `~/.config/gh-sandbox-proxy/config.yml`
 - Exact symlink that will be created, usually `~/.local/bin/gh`
-- Docker image/container/volume names that may be created
+- Docker image/container names that may be created
 - Proposed `workspace_mounts`
 - Verification commands that will be run
 
-Ask for explicit approval before running the installer or editing files.
+Ask for explicit approval before changing files, symlinks, or Docker resources.
 
-5. After approval, run:
+5. After approval, perform the setup as individual, inspectable steps:
 
 ```bash
-./install.sh
+chmod +x bin/gh
+mkdir -p ~/.local/bin ~/.config/gh-sandbox-proxy
+ln -sfn "$PWD/bin/gh" ~/.local/bin/gh
+test -f ~/.config/gh-sandbox-proxy/config.yml || cp config.example.yml ~/.config/gh-sandbox-proxy/config.yml
+docker build -t gh-sandbox-proxy:latest .
 ```
 
-The installer is a low-level execution helper. It installs the wrapper symlink,
-a zshenv PATH shim, builds the Docker image, and runs command-resolution checks.
-Do not treat it as the whole setup experience; the skill is responsible for
-previewing and confirming the changes first.
+6. Add or update this marker block in `~/.zshenv`, adjusted to the repository's
+   absolute `bin` path:
 
-6. Edit `~/.config/gh-sandbox-proxy/config.yml` and set the approved roots:
+```zsh
+# >>> gh-sandbox-proxy PATH >>>
+# Ensure coding-agent shells use gh-sandbox-proxy before Homebrew gh.
+_gh_wrapper_bin='/absolute/path/to/gh-sandbox-proxy/bin'
+if [[ -d "$_gh_wrapper_bin" ]]; then
+  path=("$_gh_wrapper_bin" "${(@)path:#$_gh_wrapper_bin}")
+  export PATH
+fi
+unset _gh_wrapper_bin
+# <<< gh-sandbox-proxy PATH <<<
+```
+
+7. Edit `~/.config/gh-sandbox-proxy/config.yml` and set the approved roots:
 
 ```yaml
 workspace_mounts:
@@ -62,7 +75,7 @@ workspace_mounts:
   - ~/Documents/src
 ```
 
-7. Verify:
+8. Verify:
 
 ```bash
 type gh
@@ -80,29 +93,24 @@ Expected:
 - `gh sandbox status` shows a `container_workdir` when run under a configured
   workspace mount.
 
-Use this helper to list initial candidates:
-
-```bash
-gh sandbox suggest-mounts
-```
-
-If `zsh -lc` resolves the official `gh`, treat the install as failed and inspect
+If `zsh -lc` resolves the official `gh`, treat setup as failed and inspect
 `~/.zshenv`, shell startup files, and the agent process environment before
 continuing. Do not leave a machine in a split state where terminal shells use the
 wrapper but coding agents use the official `gh`.
 
 ## Uninstall
 
-Run:
+Run only after telling the user what it removes:
 
 ```bash
 ./uninstall.sh
 ```
 
 This removes wrapper symlinks, restores the backed-up `/usr/local/bin/gh` when
-present, and removes the active Docker sandbox container.
+present, removes gh-sandbox-proxy marker blocks from shell startup files, and
+removes the active Docker sandbox container.
 
-## Safety notes
+## Safety Notes
 
 - Do not copy host `~/.config/gh` or host GitHub tokens into the sandbox.
 - Do not bypass the wrapper by calling `gh auth token`.
