@@ -175,6 +175,10 @@ GitHub CLI token:
 
 - host `gh auth token` is blocked
 - host `gh auth status --show-token` is blocked
+- host `gh api` is restricted to GET / HEAD / OPTIONS so that coding-agent
+  sandboxes can exempt `gh api *` from sandboxing without also opening up
+  arbitrary GitHub API mutations. To override for one shell session, set
+  `GH_SANDBOX_ALLOW_WRITE=1`
 - official `gh` auth files are stored only in the sandbox tmpfs
 - the container exits after the configured expiry policy
   (`ttl` by default, or the active window when enabled)

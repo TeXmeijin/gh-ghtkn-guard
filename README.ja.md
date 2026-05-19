@@ -174,6 +174,10 @@ container を削除し、tmpfs 上の auth data も揮発します。
 
 - host 側の `gh auth token` を block する
 - host 側の `gh auth status --show-token` を block する
+- host 側の `gh api` を GET / HEAD / OPTIONS に限定する。これにより coding agent
+  の sandbox から `gh api *` 全体を素直に exempt しても、任意の GitHub API
+  mutation までは通らない。1 shell session だけ解除したい場合は
+  `GH_SANDBOX_ALLOW_WRITE=1` を設定する
 - 公式 `gh` の auth file を sandbox tmpfs にだけ置く
 - container は設定された expiry policy に従って終了する。
   デフォルトは `ttl`、有効化時は active window
