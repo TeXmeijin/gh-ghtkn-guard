@@ -11,8 +11,6 @@ App User Access Token for each `gh` invocation, injects that token only into the
 real GitHub CLI child process, and blocks token-printing commands on the wrapper
 interface.
 
-Despite the historical name, the current wrapper does not use Docker.
-
 ## Why
 
 Agent-assisted development increases the chance that arbitrary project scripts,

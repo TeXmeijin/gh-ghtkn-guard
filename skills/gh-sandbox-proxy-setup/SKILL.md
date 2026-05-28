@@ -11,8 +11,6 @@ local shell commands. It calls `ghtkn get "$GHTKN_APP_NAME"` and passes the
 resulting token only to the real GitHub CLI child process while blocking
 host-side token printing.
 
-The current wrapper does not use Docker.
-
 ## Setup Workflow
 
 This skill owns setup. There is no one-shot setup script. Setup must be
