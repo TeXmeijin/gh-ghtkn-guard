@@ -139,6 +139,7 @@ def ghtkn_token(app_name: str) -> str:
         raise SystemExit(
             f"{APP}: timed out while waiting for ghtkn token.\n"
             f"{APP}: ghtkn may be waiting for GitHub Device Flow authorization.\n"
+            f"{APP}: if a one-time code was printed above, enter it in the GitHub device page.\n"
             f"{APP}: run this once in a normal interactive terminal, then retry:\n"
             f"{APP}:   ghtkn get {shlex.quote(app_name)} >/dev/null"
         )

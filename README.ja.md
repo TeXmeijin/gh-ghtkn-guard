@@ -99,8 +99,11 @@ token は本家 `gh` の子プロセスにだけ渡され、親 shell には exp
 
 `ghtkn` が GitHub Device Flow の対話認可を必要とする場合、wrapper は
 `ghtkn` の stdout を stream しません。stdout は token 取得用に予約しているためです。
-代わりに timeout して、実行すべき command を stderr に出して終了します。通常の対話
-terminal で一度認可してから、`gh` command を再実行します。
+`ghtkn` は一回限りの Device Flow code を stderr に出すため、コーディングエージェント
+にも `XXXX-XXXX` の code は見えます。token が返らない場合、wrapper は timeout して
+実行すべき command を stderr に出して終了します。上に表示された code を GitHub の
+device page に入力するか、通常の対話 terminal で一度認可してから、`gh` command を
+再実行します。
 
 ```zsh
 ghtkn get "$GHTKN_APP_NAME" >/dev/null

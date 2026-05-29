@@ -100,8 +100,9 @@ Expected:
   authenticated the real `gh`.
 - If the first `gh` command times out while waiting for `ghtkn`, run
   `ghtkn get "$GHTKN_APP_NAME" >/dev/null` once in a normal interactive
-  terminal and retry. The wrapper does not stream `ghtkn` stdout because stdout
-  is reserved for the token.
+  terminal and retry, or enter the one-time code printed above in the GitHub
+  device page. The wrapper does not stream `ghtkn` stdout because stdout is
+  reserved for the token, but `ghtkn` prints the Device Flow code to stderr.
 
 If the target agent shell resolves the official `gh`, treat setup as failed and
 inspect shell startup files and the agent process environment before continuing.

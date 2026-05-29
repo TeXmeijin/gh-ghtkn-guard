@@ -98,9 +98,11 @@ The token is scoped to the real `gh` child process. It is not exported into the
 parent shell.
 
 If `ghtkn` needs interactive GitHub Device Flow authorization, the wrapper does
-not stream `ghtkn` stdout because stdout is reserved for the token. Instead it
-times out and prints an actionable error. Run the authorization once in a normal
-interactive terminal, then retry the `gh` command:
+not stream `ghtkn` stdout because stdout is reserved for the token. `ghtkn`
+prints the one-time Device Flow code to stderr, so coding agents can still see
+the `XXXX-XXXX` code. The wrapper times out and prints an actionable error if no
+token arrives. Enter the code shown above in the GitHub device page, or run the
+authorization once in a normal interactive terminal, then retry the `gh` command:
 
 ```zsh
 ghtkn get "$GHTKN_APP_NAME" >/dev/null
