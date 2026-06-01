@@ -20,7 +20,7 @@ from pathlib import Path
 APP = "gh-ghtkn-guard"
 DEFAULT_REAL_GH_BIN = "/opt/homebrew/bin/gh"
 DEFAULT_GHTKN_BIN = "/opt/homebrew/bin/ghtkn"
-DEFAULT_GHTKN_TIMEOUT_SECONDS = 20
+DEFAULT_GHTKN_TIMEOUT_SECONDS = 300
 
 
 def eprint(message: str = "") -> None:
@@ -175,7 +175,7 @@ Optional environment:
   GH_GHTKN_GUARD_REAL_GH=/path/to/gh
   GH_GHTKN_GUARD_GHTKN_BIN=/path/to/ghtkn
   GH_GHTKN_GUARD_ALLOW_WRITE=1  allow write-likely `gh api` calls
-  GH_GHTKN_GUARD_GHTKN_TIMEOUT_SECONDS=20
+  GH_GHTKN_GUARD_GHTKN_TIMEOUT_SECONDS=300
 """
     )
 

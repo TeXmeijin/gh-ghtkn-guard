@@ -40,10 +40,13 @@ wrong instruction (see traps below).
 
 ### Why the naive flow fails (and why "ask the human to run it" is wrong)
 
-- **The wrapper's ghtkn timeout defaults to 20s** (`DEFAULT_GHTKN_TIMEOUT_SECONDS`
-  in `bin/gh`). A plain foreground `gh` call gives up after 20s with
-  `gh-ghtkn-guard: timed out while waiting for ghtkn token` — long before a human
-  can authorize. The 20s timeout, NOT a missing token, is what kills the call.
+- **A plain FOREGROUND `gh` call blocks your whole turn.** With no cached token,
+  ghtkn runs device flow and waits for authorization up to the wrapper's
+  `DEFAULT_GHTKN_TIMEOUT_SECONDS` (now 300s, in `bin/gh`). A foreground call hangs
+  that long and you cannot surface the code until it returns. Run it in the
+  BACKGROUND so you can read the code from stderr while `gh` keeps polling. (If
+  you ever see `gh-ghtkn-guard: timed out while waiting for ghtkn token`, the
+  timeout is too short for this case — raise it, see "Overriding the timeout".)
 - **The human's interactive shell often does NOT have the wrapper on PATH.**
   direnv may export `GHTKN_APP_NAME` without prepending the wrapper bin, so in
   the human's terminal `which gh` is the real, logged-out gh and `gh auth status`
@@ -57,43 +60,39 @@ wrong instruction (see traps below).
 
 ### Working recipe (agent-driven)
 
-1. Run the real `gh` command with an extended wrapper timeout, IN THE
-   BACKGROUND, capturing stderr so you can read the device code:
+1. Run the real `gh` command IN THE BACKGROUND, capturing stderr so you can read
+   the device code while the call keeps waiting:
 
    ```
-   GH_GHTKN_GUARD_GHTKN_TIMEOUT_SECONDS=300 gh issue view <url> --json ... \
-     > "$TMPDIR/gh.out" 2> "$TMPDIR/gh.err"
+   gh issue view <url> --json ... > "$TMPDIR/gh.out" 2> "$TMPDIR/gh.err"
    ```
-   (`run_in_background: true`. 300s comfortably covers human authorization and
-   stays under the code's ~15-min GitHub validity.)
+   (`run_in_background: true`. No env prefix needed — the wrapper default of 300s
+   already covers human authorization, and `gh` stays the first token so the
+   sandbox `gh`/`gh *` exclusion always applies.)
 
 2. After ~6s, read `$TMPDIR/gh.err`:
    - `Copy your one-time code: XXXX-XXXX` → surface that code AND
      https://github.com/login/device to the human. That is their only step.
-   - `tls: ... x509` instead → the sandbox `gh` exclusion didn't apply to this
-     invocation; see the env-prefix note below.
+   - `tls: ... x509` instead → the sandbox `gh` exclusion didn't apply; you are
+     not running `gh` as the first token (loop / function / leading assignment).
 
-3. The backgrounded `gh` keeps polling for up to 300s. When the human
-   authorizes, ghtkn caches the token (~8h), `gh` completes and writes real
-   output to `$TMPDIR/gh.out`. You are notified when the background task ends —
-   read the output file then.
+3. The backgrounded `gh` keeps polling for up to 300s. When the human authorizes,
+   ghtkn caches the token (~8h), `gh` completes and writes real output to
+   `$TMPDIR/gh.out`. You are notified when the background task ends — read the
+   output file then.
 
 4. Subsequent flat `gh` calls this session now succeed with no device flow. Run
    each ONCE — do not loop.
 
-### env-prefix vs the top-level-`gh` rule
+### Overriding the timeout
 
-The recipe puts `GH_GHTKN_GUARD_GHTKN_TIMEOUT_SECONDS=...` as a leading
-assignment before `gh`. The top-level-`gh` rule below warns a leading variable
-assignment *can* break the `excludedCommands` match. **Verified in Claude Code:
-the `GH_GHTKN_GUARD_GHTKN_TIMEOUT_SECONDS=N gh ...` form ran unsandboxed and
-reached the device flow** (got a code, not a TLS error). If a future runtime
-instead returns a TLS x509 in step 2, set the timeout as a persistent env var so
-`gh` stays the first token — e.g. in Claude Code `settings.json`:
-
-```
-"env": { "GH_GHTKN_GUARD_GHTKN_TIMEOUT_SECONDS": "300" }
-```
+The default lives in one place: `DEFAULT_GHTKN_TIMEOUT_SECONDS = 300` in `bin/gh`.
+The timeout only matters when there is no cached token (device flow); with a
+token, ghtkn returns instantly regardless. To override for one call, prefix
+`GH_GHTKN_GUARD_GHTKN_TIMEOUT_SECONDS=N gh ...` (verified to run unsandboxed even
+as a leading assignment), or set it in Claude Code `settings.json` `env`. Lower
+it (e.g. 20) when you want a no-token call to fail fast instead of waiting for a
+human.
 
 Still applies: **do not run bare `ghtkn` yourself** (a PreToolUse hook blocks it,
 and sandboxed it hits TLS), and **do not loop** the call.
