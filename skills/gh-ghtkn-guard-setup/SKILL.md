@@ -107,6 +107,16 @@ Expected:
 If the target agent shell resolves the official `gh`, treat setup as failed and
 inspect shell startup files and the agent process environment before continuing.
 
+9. Install the companion skills (`gh-runner`, `gh-ghtkn-guard-setup`) into the
+    agent's skills directory by symlinking or copying **from this repo**, which
+    is their single source of truth. Do not hand-edit the installed copy — that
+    is how the two diverge. For Claude Code:
+
+    ```bash
+    ln -snf "$PWD/skills/gh-runner" ~/.claude/skills/gh-runner
+    ln -snf "$PWD/skills/gh-ghtkn-guard-setup" ~/.claude/skills/gh-ghtkn-guard-setup
+    ```
+
 ## Uninstall
 
 Run only after telling the user what it removes:
@@ -125,3 +135,8 @@ present, and removes gh-ghtkn-guard marker blocks from shell startup files.
 - Do not add broad agent permission for direct `ghtkn` execution unless the user
   explicitly wants agents to perform setup or reauthorization themselves.
 - `ghtkn` uses GitHub App User Access Tokens; GitHub controls their expiration.
+- First authentication of a session (device flow) is agent-driven: the agent runs
+  the real `gh` in the background, surfaces the one-time code, and the human only
+  enters it and authorizes. The agent must not run bare `ghtkn`, must not loop the
+  call, and must not claim a printed code "expired" (it does not know the current
+  time). See the `gh-runner` skill, "First authentication in a session".
