@@ -25,6 +25,12 @@ Before applying this skill, confirm:
 
 If any of those is unclear, run the self-diagnostic at the bottom first.
 
+**Judge from the AGENT shell, not a human terminal.** The wrapper's PATH prepend
+is gated to agent shells (and to `GHTKN_APP_NAME` being set at shell startup). In
+a human's own interactive shell `which gh` usually resolves the *real*, logged-out
+gh **by design** — that is not a broken setup, and a manual `gh` / `gh auth status`
+test there tells you nothing about the agent.
+
 ## First authentication in a session (no cached token)
 
 ghtkn caches a User Access Token for ~8h. The FIRST `gh` call after that
@@ -329,9 +335,11 @@ echo "GHTKN_APP_NAME=$GHTKN_APP_NAME"          # right app for the current owner
 echo "${GH_TOKEN+set}"                         # should be empty in the agent shell
 ```
 
-If `which gh` does not point to `gh-ghtkn-guard/bin/gh`, this skill does
-not apply; switch to the agent's default `gh` flow or invoke the
-`gh-ghtkn-guard-setup` skill to install the wrapper first.
+Run these **in the agent shell**. If `which gh` does not point to
+`gh-ghtkn-guard/bin/gh` *there*, the wrapper is not wired for the agent: invoke
+the `gh-ghtkn-guard-setup` skill. (In a human's interactive shell the real gh is
+expected — see Assumptions.) `gh --version` is a safe probe; it passes through to
+the real gh without triggering ghtkn / Device Flow.
 
 ## See also
 

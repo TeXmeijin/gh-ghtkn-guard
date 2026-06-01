@@ -117,6 +117,40 @@ inspect shell startup files and the agent process environment before continuing.
     ln -snf "$PWD/skills/gh-ghtkn-guard-setup" ~/.claude/skills/gh-ghtkn-guard-setup
     ```
 
+## State check (doctor)
+
+For a machine that already has (some of) the setup, run this **in the agent
+shell** to see how far it has progressed. It is read-only and does not trigger
+Device Flow (no `gh auth` call). In a human's own interactive terminal the
+`wrapper on PATH` line will show the real gh **by design** — judge from the agent
+shell.
+
+```bash
+printf 'wrapper on PATH  : %s\n' "$(command -v gh)"
+printf 'real gh present  : %s\n' "$(ls /opt/homebrew/bin/gh 2>/dev/null || echo MISSING)"
+printf 'ghtkn present    : %s\n' "$(command -v ghtkn || echo MISSING)"
+printf 'GHTKN_APP_NAME   : %s\n' "${GHTKN_APP_NAME:-<unset>}"
+printf 'GH_TOKEN in env  : %s\n' "${GH_TOKEN:+LEAKED - should be empty}${GH_TOKEN:-clean}"
+grep -q gh-ghtkn-guard "$HOME/.zshenv" 2>/dev/null \
+  && echo 'zshenv PATH block: present' || echo 'zshenv PATH block: MISSING (steps 5-6)'
+for s in gh-runner gh-ghtkn-guard-setup; do
+  p="$HOME/.claude/skills/$s"
+  if [ -L "$p" ]; then echo "skill $s: symlink (good)"
+  elif [ -d "$p" ]; then echo "skill $s: COPY (works but drifts - prefer symlink, step 9)"
+  else echo "skill $s: NOT INSTALLED (step 9)"; fi
+done
+```
+
+Interpretation:
+
+- `wrapper on PATH` should be the repo's `bin/gh` in the agent shell. `ghtkn present`
+  and a non-`<unset>` `GHTKN_APP_NAME` mean auth can resolve. `GH_TOKEN in env`
+  must read `clean`. The two `skill` lines show whether step 9 was done (symlink),
+  half-done (copy — drifts from the repo source), or skipped.
+- To test live auth separately, run `gh --version` (safe pass-through) then a real
+  read like `gh api user --jq .login`; the latter starts Device Flow only when no
+  token is cached for the ~8h window.
+
 ## Uninstall
 
 Run only after telling the user what it removes:

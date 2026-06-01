@@ -187,6 +187,12 @@ def main() -> int:
         print_help()
         return 0
 
+    # `--version` / `version` need no auth. Pass them straight to the real gh
+    # without calling ghtkn, so a self-diagnostic stays side-effect-free even
+    # with no cached token (no Device Flow is triggered).
+    if args in (["--version"], ["version"]):
+        return subprocess.run([real_gh_bin(), *args]).returncode
+
     if is_blocked(args):
         eprint(f"{APP}: blocked: this wrapper never exposes GitHub auth tokens on the host interface.")
         eprint(f"{APP}: command was: gh {' '.join(shlex.quote(arg) for arg in args)}")
