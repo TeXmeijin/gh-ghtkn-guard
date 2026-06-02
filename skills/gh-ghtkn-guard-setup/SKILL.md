@@ -74,6 +74,37 @@ For Claude Code or a team machine that should always use the wrapper in project
 shells, a broader shell startup rule is acceptable if the user explicitly wants
 that behavior.
 
+### When PATH prepend is not enough (mise / rbenv / asdf)
+
+The prepend in step 6 runs once at shell startup. Tools that **rebuild PATH on
+every prompt** — `mise`, `rbenv`, `asdf`, and similar — can silently drop the
+prepended wrapper entry, because they reconstruct PATH from a snapshot captured
+*before* the prepend ran (`mise` stores it in `__MISE_ORIG_PATH`). The symptom:
+`command -v gh` resolves the wrapper right after sourcing startup files, but the
+agent's actual shell (e.g. Claude Code's startup snapshot plus the mise precmd
+hook) resolves the real gh, with only the wrapper's single PATH entry missing.
+Setup looks done, yet every agent `gh` call hits the logged-out real gh.
+
+The robust fix is to put the wrapper where PATH already points, instead of
+fighting the rebuild. Symlink `bin/gh` into a directory that (a) the version
+manager preserves (i.e. it is already in `__MISE_ORIG_PATH`) and (b) sits
+**before** the real gh's directory (`/opt/homebrew/bin`) in PATH. `~/.local/bin`
+is usually both:
+
+```bash
+ln -s /absolute/path/to/gh-ghtkn-guard/bin/gh ~/.local/bin/gh
+```
+
+The wrapper resolves real gh / ghtkn by absolute path and environment variables
+and does **not** depend on its own location, so a symlink (or copy) placed
+anywhere behaves identically. Confirm no earlier PATH directory already provides
+a `gh` (e.g. `~/.opencode/bin/gh`, `~/.bun/bin/gh`) that would shadow it, then
+verify in the agent shell that the wrapper wins even after a PATH rebuild:
+
+```bash
+command -v gh   # must be the wrapper (e.g. ~/.local/bin/gh), not /opt/homebrew/bin/gh
+```
+
 7. Configure `GHTKN_APP_NAME`, for example:
 
 ```zsh
