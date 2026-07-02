@@ -10,10 +10,13 @@ interface.
 
 from __future__ import annotations
 
+import fcntl
+import json
 import os
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -45,13 +48,39 @@ def ghtkn_bin() -> str:
     raise SystemExit(f"{APP}: ghtkn not found or not executable: {ghtkn}")
 
 
+def env_from_direnv(name: str) -> str:
+    direnv = os.environ.get("GH_GHTKN_GUARD_DIRENV_BIN") or "/opt/homebrew/bin/direnv"
+    if not executable(direnv):
+        return ""
+    proc = subprocess.run(
+        [direnv, "export", "json"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        timeout=5,
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return ""
+    try:
+        exported = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return ""
+    value = exported.get(name)
+    return value.strip() if isinstance(value, str) else ""
+
+
 def ghtkn_app_name() -> str:
     app_name = os.environ.get("GHTKN_APP_NAME", "").strip()
     if app_name:
         return app_name
+    app_name = env_from_direnv("GHTKN_APP_NAME")
+    if app_name:
+        return app_name
     raise SystemExit(
         f"{APP}: GHTKN_APP_NAME is required.\n"
-        f"{APP}: set it per project, for example with direnv or shell startup:\n"
+        f"{APP}: set it per project, for example with direnv or shell startup.\n"
+        f"{APP}: direnv export json did not provide GHTKN_APP_NAME for cwd: {Path.cwd()}\n"
         f"{APP}:   export GHTKN_APP_NAME=owner/app-name"
     )
 
@@ -126,15 +155,19 @@ def is_api_write(args: list[str]) -> tuple[bool, str]:
 
 
 def ghtkn_token(app_name: str) -> str:
+    lock_name = app_name.replace("/", "_")
+    lock_path = Path(tempfile.gettempdir()) / f"{APP}-{lock_name}.lock"
     try:
-        proc = subprocess.run(
-            [ghtkn_bin(), "get", app_name],
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=None,
-            timeout=ghtkn_timeout_seconds(),
-        )
+        with lock_path.open("w") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            proc = subprocess.run(
+                [ghtkn_bin(), "get", app_name],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=None,
+                timeout=ghtkn_timeout_seconds(),
+            )
     except subprocess.TimeoutExpired:
         raise SystemExit(
             f"{APP}: timed out while waiting for ghtkn token.\n"
@@ -174,6 +207,7 @@ Required environment:
 Optional environment:
   GH_GHTKN_GUARD_REAL_GH=/path/to/gh
   GH_GHTKN_GUARD_GHTKN_BIN=/path/to/ghtkn
+  GH_GHTKN_GUARD_DIRENV_BIN=/path/to/direnv
   GH_GHTKN_GUARD_ALLOW_WRITE=1  allow write-likely `gh api` calls
   GH_GHTKN_GUARD_GHTKN_TIMEOUT_SECONDS=300
 """
