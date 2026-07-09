@@ -129,11 +129,9 @@ Expected:
 - `gh auth token` is blocked by `gh-ghtkn-guard`.
 - Direct real `gh auth token` returns no token unless the user has separately
   authenticated the real `gh`.
-- If the first `gh` command times out while waiting for `ghtkn`, run
-  `ghtkn get "$GHTKN_APP_NAME" >/dev/null` once in a normal interactive
-  terminal and retry, or enter the one-time code printed above in the GitHub
-  device page. The wrapper does not stream `ghtkn` stdout because stdout is
-  reserved for the token, but `ghtkn` prints the Device Flow code to stderr.
+- If the first `gh` command fails because no cached ghtkn token is available,
+  run `ghtkn auth "$GHTKN_APP_NAME"` once in a normal interactive terminal and
+  retry. Do not run `gh auth login`; the real `gh` is intentionally logged out.
 
 If the target agent shell resolves the official `gh`, treat setup as failed and
 inspect shell startup files and the agent process environment before continuing.
@@ -179,8 +177,9 @@ Interpretation:
   must read `clean`. The two `skill` lines show whether step 9 was done (symlink),
   half-done (copy — drifts from the repo source), or skipped.
 - To test live auth separately, run `gh --version` (safe pass-through) then a real
-  read like `gh api user --jq .login`; the latter starts Device Flow only when no
-  token is cached for the ~8h window.
+  read like `gh api user --jq .login`; the latter succeeds only when ghtkn has a
+  cached token. If it fails, refresh with `ghtkn auth "$GHTKN_APP_NAME"` in a
+  normal interactive terminal.
 
 ## Uninstall
 
@@ -200,8 +199,7 @@ present, and removes gh-ghtkn-guard marker blocks from shell startup files.
 - Do not add broad agent permission for direct `ghtkn` execution unless the user
   explicitly wants agents to perform setup or reauthorization themselves.
 - `ghtkn` uses GitHub App User Access Tokens; GitHub controls their expiration.
-- First authentication of a session (device flow) is agent-driven: the agent runs
-  the real `gh` in the background, surfaces the one-time code, and the human only
-  enters it and authorizes. The agent must not run bare `ghtkn`, must not loop the
-  call, and must not claim a printed code "expired" (it does not know the current
-  time). See the `gh-runner` skill, "First authentication in a session".
+- First authentication of a session is human-driven via `ghtkn auth`; the agent
+  retries `gh` after the cache exists. The agent must not loop the call or ask
+  for `gh auth login`. See the `gh-runner` skill, "First authentication in a
+  session".

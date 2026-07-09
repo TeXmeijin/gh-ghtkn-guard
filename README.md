@@ -97,15 +97,13 @@ GH_TOKEN=<token> GITHUB_TOKEN=<token> /opt/homebrew/bin/gh ...
 The token is scoped to the real `gh` child process. It is not exported into the
 parent shell.
 
-If `ghtkn` needs interactive GitHub Device Flow authorization, the wrapper does
-not stream `ghtkn` stdout because stdout is reserved for the token. `ghtkn`
-prints the one-time Device Flow code to stderr, so coding agents can still see
-the `XXXX-XXXX` code. The wrapper times out and prints an actionable error if no
-token arrives. Enter the code shown above in the GitHub device page, or run the
-authorization once in a normal interactive terminal, then retry the `gh` command:
+The wrapper intentionally disables Device Flow for `ghtkn get`. If no cached
+token is available, `ghtkn get` exits without printing a token and the wrapper
+prints an actionable error. Run the interactive authorization once in a normal
+terminal, then retry the `gh` command:
 
 ```zsh
-ghtkn get "$GHTKN_APP_NAME" >/dev/null
+ghtkn auth "$GHTKN_APP_NAME"
 ```
 
 ## Security Model

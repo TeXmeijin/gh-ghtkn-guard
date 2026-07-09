@@ -33,75 +33,32 @@ test there tells you nothing about the agent.
 
 ## First authentication in a session (no cached token)
 
-ghtkn caches a User Access Token for ~8h. The FIRST `gh` call after that
-window expires triggers a GitHub **device flow**: `gh` prints a one-time code
-(`Copy your one-time code: XXXX-XXXX`) and ghtkn blocks until someone authorizes
-it at https://github.com/login/device.
+ghtkn caches a User Access Token for ~8h. The wrapper calls
+`ghtkn get "$GHTKN_APP_NAME"` with Device Flow disabled, so a missing or expired
+cache fails fast instead of starting interactive authentication inside an agent
+command.
 
-**The agent CAN drive this to completion.** The only human action is typing the
-code and clicking Authorize; the agent triggers the flow, surfaces the code,
-waits out the authorization, and gets control back with a cached token. Do NOT
-retreat to "please run `ghtkn get` in your own terminal" — that is usually the
-wrong instruction (see traps below).
+If the first `gh` call fails with a ghtkn message saying a token cannot be
+created via Device Flow, ask the human to run this once in a normal interactive
+terminal and then retry the same `gh` command:
 
-### Why the naive flow fails (and why "ask the human to run it" is wrong)
+```
+ghtkn auth "$GHTKN_APP_NAME"
+```
 
-- **A plain FOREGROUND `gh` call blocks your whole turn.** With no cached token,
-  ghtkn runs device flow and waits for authorization up to the wrapper's
-  `DEFAULT_GHTKN_TIMEOUT_SECONDS` (now 300s, in `bin/gh`). A foreground call hangs
-  that long and you cannot surface the code until it returns. Run it in the
-  BACKGROUND so you can read the code from stderr while `gh` keeps polling. (If
-  you ever see `gh-ghtkn-guard: timed out while waiting for ghtkn token`, the
-  timeout is too short for this case — raise it, see "Overriding the timeout".)
-- **The human's interactive shell often does NOT have the wrapper on PATH.**
-  direnv may export `GHTKN_APP_NAME` without prepending the wrapper bin, so in
-  the human's terminal `which gh` is the real, logged-out gh and `gh auth status`
-  returns a meaningless "please run gh auth login". The wrapper is active in the
-  AGENT's PATH, not necessarily the human's — so the agent must drive auth itself,
-  and a manual test in the human's shell proves nothing.
-- A device-flow code means "no cached token THIS 8h window" — NOT "permanently
-  unauthenticated" and NOT "the human must fix it in their terminal".
-- **Do not assert the code "expired" from memory.** A printed code is valid
-  ~15 min; you do not know the wall-clock time.
-
-### Working recipe (agent-driven)
-
-1. Run the real `gh` command IN THE BACKGROUND, capturing stderr so you can read
-   the device code while the call keeps waiting:
-
-   ```
-   gh issue view <url> --json ... > "$TMPDIR/gh.out" 2> "$TMPDIR/gh.err"
-   ```
-   (`run_in_background: true`. No env prefix needed — the wrapper default of 300s
-   already covers human authorization, and `gh` stays the first token so the
-   sandbox `gh`/`gh *` exclusion always applies.)
-
-2. After ~6s, read `$TMPDIR/gh.err`:
-   - `Copy your one-time code: XXXX-XXXX` → surface that code AND
-     https://github.com/login/device to the human. That is their only step.
-   - `tls: ... x509` instead → the sandbox `gh` exclusion didn't apply; you are
-     not running `gh` as the first token (loop / function / leading assignment).
-
-3. The backgrounded `gh` keeps polling for up to 300s. When the human authorizes,
-   ghtkn caches the token (~8h), `gh` completes and writes real output to
-   `$TMPDIR/gh.out`. You are notified when the background task ends — read the
-   output file then.
-
-4. Subsequent flat `gh` calls this session now succeed with no device flow. Run
-   each ONCE — do not loop.
+Do not ask them to run `gh auth login`; the real `gh` is intentionally logged
+out. Do not ask them to run `ghtkn get`; `get` outputs a token and is not the
+right refresh command for this setup.
 
 ### Overriding the timeout
 
 The default lives in one place: `DEFAULT_GHTKN_TIMEOUT_SECONDS = 300` in `bin/gh`.
-The timeout only matters when there is no cached token (device flow); with a
-token, ghtkn returns instantly regardless. To override for one call, prefix
+The timeout only matters if `ghtkn get` hangs unexpectedly; with a cached token,
+ghtkn returns instantly. To override for one call, prefix
 `GH_GHTKN_GUARD_GHTKN_TIMEOUT_SECONDS=N gh ...` (verified to run unsandboxed even
-as a leading assignment), or set it in Claude Code `settings.json` `env`. Lower
-it (e.g. 20) when you want a no-token call to fail fast instead of waiting for a
-human.
+as a leading assignment), or set it in Claude Code `settings.json` `env`.
 
-Still applies: **do not run bare `ghtkn` yourself** (a PreToolUse hook blocks it,
-and sandboxed it hits TLS), and **do not loop** the call.
+Still applies: **do not loop** the call.
 
 ## Wrapper semantics (recap)
 
@@ -154,17 +111,15 @@ invisible.
 
 If a call returns `HTTP 401 Bad credentials` or `gh auth status` says `The
 token in GH_TOKEN is invalid`, just retry the command — the wrapper will
-fetch a fresh token. If that still fails, refresh explicitly **once** for
-the next batch:
+fetch a fresh token if one is cached. If that still fails, ask the human to
+refresh explicitly **once** in a normal interactive terminal:
 
 ```
-export GH_TOKEN=$(ghtkn get "$GHTKN_APP_NAME")
-gh <command-that-needs-the-fresh-token>
-unset GH_TOKEN
+ghtkn auth "$GHTKN_APP_NAME"
 ```
 
-Never log, paste, or commit the token. No `echo "$GH_TOKEN"` even for a
-prefix sanity check unless absolutely necessary.
+Never log, paste, or commit a token. No `echo "$GH_TOKEN"` even for a prefix
+sanity check unless absolutely necessary.
 
 ## Blocked `gh api` writes — use native subcommands first
 
