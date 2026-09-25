@@ -1,0 +1,4 @@
+interface:
+  display_name: "GH Runner"
+  short_description: "Run gh through gh-ghtkn-guard"
+  default_prompt: "Use $gh-runner to run GitHub CLI commands through the configured wrapper."

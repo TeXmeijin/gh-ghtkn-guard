@@ -103,6 +103,43 @@ If `ghtkn` fails with `tls: failed to verify certificate: x509: OSStatus
 cause is a non-top-level invocation. Rewrite the command first; do not
 disable sandboxing or wrapper guards.
 
+### Codex
+
+Codex uses `.codex/rules/*.rules` to decide which commands run outside its
+local sandbox. A trusted project that requires this wrapper should include a
+rule equivalent to:
+
+```python
+prefix_rule(
+    pattern = ["gh"],
+    decision = "allow",
+    justification = "Run the gh wrapper on the host so it can use the credential store.",
+)
+```
+
+Keep more specific `prompt` or `forbidden` rules for mutating and token-printing
+subcommands. Codex applies the most restrictive matching decision.
+
+After changing a project config or rules file, restart Codex before judging the
+result. Validate the rule without invoking GitHub:
+
+```bash
+codex execpolicy check --pretty \
+  --rules ~/.codex/rules/default.rules \
+  --rules .codex/rules/default.rules \
+  -- gh pr view 123 --json title
+```
+
+The result must be `allow`. Then run one flat, top-level `gh` read. If a human
+has completed `ghtkn auth` successfully but that read still reports that Device
+Flow is disabled, do not request authentication again. Treat it as a Codex
+sandbox/configuration problem: inspect `codex doctor --summary`, confirm the
+active rule, check whether legacy `sandbox_mode` and permission-profile settings
+were mixed across config layers, and restart Codex after corrections.
+
+Do not retry a failing top-level call in a loop. In Claude Code, inspect
+`excludedCommands`; in Codex, inspect `.codex/rules` and the active config.
+
 ## Token freshness
 
 ghtkn-issued User Access Tokens (`ghu_...`) expire in ~8 hours. The wrapper

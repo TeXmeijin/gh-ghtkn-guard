@@ -136,15 +136,45 @@ Expected:
 If the target agent shell resolves the official `gh`, treat setup as failed and
 inspect shell startup files and the agent process environment before continuing.
 
-9. Install the companion skills (`gh-runner`, `gh-ghtkn-guard-setup`) into the
-    agent's skills directory by symlinking or copying **from this repo**, which
-    is their single source of truth. Do not hand-edit the installed copy — that
-    is how the two diverge. For Claude Code:
+9. Install the companion skills (`gh-runner`, `gh-ghtkn-guard-setup`) from this
+   repository, which is their single source of truth. Use `~/.agents/skills/`
+   as the common entry and point Codex and Claude Code at it with symlinks:
 
     ```bash
-    ln -snf "$PWD/skills/gh-runner" ~/.claude/skills/gh-runner
-    ln -snf "$PWD/skills/gh-ghtkn-guard-setup" ~/.claude/skills/gh-ghtkn-guard-setup
+    ln -snf "$PWD/skills/gh-runner" ~/.agents/skills/gh-runner
+    ln -snf "$PWD/skills/gh-ghtkn-guard-setup" ~/.agents/skills/gh-ghtkn-guard-setup
+    ln -snf ../../.agents/skills/gh-runner ~/.codex/skills/gh-runner
+    ln -snf ../../.agents/skills/gh-ghtkn-guard-setup ~/.codex/skills/gh-ghtkn-guard-setup
+    ln -snf ../../.agents/skills/gh-runner ~/.claude/skills/gh-runner
+    ln -snf ../../.agents/skills/gh-ghtkn-guard-setup ~/.claude/skills/gh-ghtkn-guard-setup
     ```
+
+   Inspect and reconcile an existing directory before replacing it with a
+   symlink. Do not hand-edit an installed copy.
+
+### Codex project setup
+
+For a team project, keep the host-execution policy in the repository so every
+trusted checkout receives the same behavior:
+
+```python
+prefix_rule(
+    pattern = ["gh"],
+    decision = "allow",
+    justification = "Run the gh wrapper on the host so it can use the credential store.",
+)
+```
+
+Place it in `.codex/rules/default.rules`, alongside more restrictive rules for
+mutating and token-printing subcommands. Restart Codex after changing config or
+rules, then verify the decision with `codex execpolicy check` before a live
+GitHub request.
+
+Do not place a developer-specific absolute wrapper path in the project's
+`config.toml`. Install the wrapper at a stable per-user PATH entry such as
+`~/.local/bin/gh`, and let the project verify that `gh --help` identifies
+`gh-ghtkn-guard`. This gives every team member the same project contract while
+keeping machine-specific installation paths in user scope.
 
 ## State check (doctor)
 
