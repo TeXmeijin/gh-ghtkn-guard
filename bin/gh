@@ -177,6 +177,10 @@ def ghtkn_token(app_name: str) -> str:
             f"{APP}:   ghtkn auth {shlex.quote(app_name)}"
         )
     if proc.returncode != 0:
+        eprint(f"{APP}: could not obtain a token for {app_name}.")
+        eprint(f"{APP}: if authorization is missing or expired, run this once in a normal interactive terminal:")
+        eprint(f"{APP}:   ghtkn auth {shlex.quote(app_name)}")
+        eprint(f"{APP}: if the error above is TLS/x509-related, run `gh` as a top-level command outside the agent sandbox.")
         raise SystemExit(proc.returncode)
 
     token = proc.stdout.strip()
@@ -203,6 +207,14 @@ Behavior:
 
 Required environment:
   GHTKN_APP_NAME=owner/app-name
+
+Authentication recovery:
+  If authorization is missing or expired, run this once in a normal
+  interactive terminal, then retry the original gh command:
+    ghtkn auth "$GHTKN_APP_NAME"
+
+  This wrapper never starts Device Flow itself. If ghtkn reports a TLS/x509
+  error, run gh as a top-level command outside the agent sandbox.
 
 Optional environment:
   GH_GHTKN_GUARD_REAL_GH=/path/to/gh
