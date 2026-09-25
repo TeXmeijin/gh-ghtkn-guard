@@ -154,6 +154,11 @@ def is_api_write(args: list[str]) -> tuple[bool, str]:
     return False, ""
 
 
+def in_agent_sandbox() -> bool:
+    # Claude Code's Bash sandbox sets SANDBOX_RUNTIME=1; unsandboxed runs leave it unset.
+    return os.environ.get("SANDBOX_RUNTIME") == "1"
+
+
 def ghtkn_token(app_name: str) -> str:
     lock_name = app_name.replace("/", "_")
     lock_path = Path(tempfile.gettempdir()) / f"{APP}-{lock_name}.lock"
@@ -178,6 +183,19 @@ def ghtkn_token(app_name: str) -> str:
         )
     if proc.returncode != 0:
         eprint(f"{APP}: could not obtain a token for {app_name}.")
+        if in_agent_sandbox():
+            # ghtkn cannot read its cached token inside the sandbox (keychain is
+            # blocked), so it reports a Device Flow error even when the
+            # authorization is still valid. Its "ask the user" hint misleads agents.
+            eprint(f"{APP}: NOTE FOR CODING AGENTS: this gh ran inside the agent sandbox (SANDBOX_RUNTIME=1).")
+            eprint(f"{APP}: ghtkn cannot read its cached token in the sandbox, so the error above does NOT mean")
+            eprint(f"{APP}: the authorization expired. Do NOT ask the user to run `ghtkn auth` yet.")
+            eprint(f"{APP}: retry gh outside the sandbox instead:")
+            eprint(f"{APP}:   - run gh as its own top-level command (no pipes, `;`, `&&`; use --jq/--template), or")
+            eprint(f"{APP}:   - rerun the command with the sandbox disabled (Claude Code: dangerouslyDisableSandbox: true).")
+            eprint(f"{APP}: only if gh still fails outside the sandbox, ask the user to run in their own terminal:")
+            eprint(f"{APP}:   ghtkn auth {shlex.quote(app_name)}")
+            raise SystemExit(proc.returncode)
         eprint(f"{APP}: if authorization is missing or expired, run this once in a normal interactive terminal:")
         eprint(f"{APP}:   ghtkn auth {shlex.quote(app_name)}")
         eprint(f"{APP}: if the error above is TLS/x509-related, run `gh` as a top-level command outside the agent sandbox.")
